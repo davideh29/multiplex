@@ -115,13 +115,13 @@ render() {
 
     # Header
     printf '\033[2K'; echo -e "${BOLD}${WHITE} MULTIPLEX${RESET}"; ((lines++))
-    printf '\033[2K'; echo -e "${DIM} ───────────────────────────────────────────────────────────────${RESET}"; ((lines++))
+    printf '\033[2K'; echo -e "${DIM} ─────────────────────────────────────────────────────────────────────────${RESET}"; ((lines++))
 
     if [[ ${#session_files[@]} -eq 0 ]]; then
         printf '\033[2K'; echo ""; ((lines++))
         printf '\033[2K'; echo -e "${DIM}  No active sessions${RESET}"; ((lines++))
         printf '\033[2K'; echo ""; ((lines++))
-        printf '\033[2K'; echo -e "${DIM} ───────────────────────────────────────────────────────────────${RESET}"; ((lines++))
+        printf '\033[2K'; echo -e "${DIM} ─────────────────────────────────────────────────────────────────────────${RESET}"; ((lines++))
         printf '\033[2K'; echo -e "${DIM}  n new workspace │ q quit${RESET}"; ((lines++))
         # Erase any leftover lines from previous render
         printf '\033[J'
@@ -150,7 +150,7 @@ render() {
 
     # Table header
     printf '\033[2K'
-    printf "  ${DIM}%-3s %-12s %-20s %-10s %-8s %s${RESET}\n" "#" "SESSION" "PROJECT" "STATUS" "CTX %" "UPDATED"
+    printf "  ${DIM}%-3s %-12s %-20s %-10s %-8s %-10s %s${RESET}\n" "#" "SESSION" "PROJECT" "STATUS" "CTX %" "UPDATED" "ACTIVITY"
     ((lines++))
 
     # Store ordered file paths for keypress lookup
@@ -161,12 +161,13 @@ render() {
         local file="${entry#*|}"
         ORDERED_FILES+=("$file")
 
-        local project status ctx_pct last_update session
+        local project status ctx_pct last_update session activity
         project=$(jq -r '.project // "?"' "$file" 2>/dev/null)
         status=$(jq -r '.status // "?"' "$file" 2>/dev/null)
         ctx_pct=$(jq -r '.context_pct // 0' "$file" 2>/dev/null)
         last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null)
         session=$(jq -r '.tmux_session // "?"' "$file" 2>/dev/null)
+        activity=$(jq -r '.activity // ""' "$file" 2>/dev/null)
 
         local age=$((now - last_update))
         local age_str
@@ -180,6 +181,11 @@ render() {
         # Truncate project name
         if [[ ${#project} -gt 20 ]]; then
             project="${project:0:19}…"
+        fi
+
+        # Truncate activity
+        if [[ ${#activity} -gt 25 ]]; then
+            activity="${activity:0:24}…"
         fi
 
         # Color and indicator based on status and staleness
@@ -215,14 +221,14 @@ render() {
 
         local ctx_int="${ctx_pct%.*}"
         printf '\033[2K'
-        printf "  %-3s %-12s %-20s ${color}${indicator} %-8s${RESET} %-8s %s\n" \
-            "$idx" "$session" "$project" "$status_text" "${ctx_int}%" "$age_str"
+        printf "  %-3s %-12s %-20s ${color}${indicator} %-8s${RESET} %-8s %-10s ${DIM}%s${RESET}\n" \
+            "$idx" "$session" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
         ((lines++))
 
         idx=$((idx + 1))
     done
 
-    printf '\033[2K'; echo -e "${DIM} ───────────────────────────────────────────────────────────────${RESET}"; ((lines++))
+    printf '\033[2K'; echo -e "${DIM} ─────────────────────────────────────────────────────────────────────────${RESET}"; ((lines++))
     printf '\033[2K'; echo -e "${DIM}  1-9 switch │ n new workspace │ q quit${RESET}"; ((lines++))
 
     # Erase any leftover lines below (e.g. if session count decreased)

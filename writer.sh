@@ -2,8 +2,8 @@
 # writer.sh — Session state writer for Multiplex
 # Called by Claude Code hooks and status line to maintain session state files.
 # Usage: writer.sh <event_type>
-# Event types: status_line, notification, stop, session_start, session_end
-# Reads JSON from stdin for status_line, notification, and stop events.
+# Event types: status_line, notification, stop, session_start, session_end, tool_use
+# Reads JSON from stdin for status_line, notification, stop, and tool_use events.
 
 set -euo pipefail
 
@@ -57,6 +57,13 @@ case "$EVENT" in
 
         read -r PANE TSESS TWIN <<< "$(get_tmux_info)"
 
+        # Preserve existing activity field
+        FILE="$SESSIONS_DIR/${SESSION_ID}.json"
+        ACTIVITY=""
+        if [[ -f "$FILE" ]]; then
+            ACTIVITY=$(jq -r '.activity // empty' "$FILE" 2>/dev/null) || true
+        fi
+
         jq -n \
             --arg sid "$SESSION_ID" \
             --arg project "$PROJECT" \
@@ -69,6 +76,7 @@ case "$EVENT" in
             --arg pane "$PANE" \
             --arg tsess "$TSESS" \
             --arg twin "$TWIN" \
+            --arg activity "$ACTIVITY" \
             '{
                 session_id: $sid,
                 project: $project,
@@ -80,7 +88,8 @@ case "$EVENT" in
                 pid: $pid,
                 tmux_pane: $pane,
                 tmux_session: $tsess,
-                tmux_window: $twin
+                tmux_window: $twin,
+                activity: $activity
             }' > "$SESSIONS_DIR/${SESSION_ID}.json"
 
         # Output status line text for Claude Code
@@ -98,7 +107,7 @@ case "$EVENT" in
         FILE="$SESSIONS_DIR/${SESSION_ID}.json"
         if [[ -f "$FILE" ]]; then
             NOW=$(date +%s)
-            jq --argjson ts "$NOW" '.status = "waiting" | .last_update = $ts' "$FILE" > "${FILE}.tmp" \
+            jq --argjson ts "$NOW" '.status = "waiting" | .last_update = $ts | .activity = "Waiting for input"' "$FILE" > "${FILE}.tmp" \
                 && mv "${FILE}.tmp" "$FILE"
         fi
         ;;
@@ -113,7 +122,7 @@ case "$EVENT" in
         FILE="$SESSIONS_DIR/${SESSION_ID}.json"
         if [[ -f "$FILE" ]]; then
             NOW=$(date +%s)
-            jq --argjson ts "$NOW" '.status = "done" | .last_update = $ts' "$FILE" > "${FILE}.tmp" \
+            jq --argjson ts "$NOW" '.status = "done" | .last_update = $ts | .activity = "Done"' "$FILE" > "${FILE}.tmp" \
                 && mv "${FILE}.tmp" "$FILE"
         fi
         ;;
@@ -157,6 +166,7 @@ case "$EVENT" in
             --arg pane "$PANE" \
             --arg tsess "$TSESS" \
             --arg twin "$TWIN" \
+            --arg activity "Starting..." \
             '{
                 session_id: $sid,
                 project: $project,
@@ -168,8 +178,74 @@ case "$EVENT" in
                 pid: $pid,
                 tmux_pane: $pane,
                 tmux_session: $tsess,
-                tmux_window: $twin
+                tmux_window: $twin,
+                activity: $activity
             }' > "$SESSIONS_DIR/${SESSION_ID}.json"
+        ;;
+
+    tool_use)
+        INPUT=$(cat)
+        SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+        if [[ -z "$SESSION_ID" ]]; then
+            exit 0
+        fi
+
+        FILE="$SESSIONS_DIR/${SESSION_ID}.json"
+        if [[ ! -f "$FILE" ]]; then
+            exit 0
+        fi
+
+        TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
+
+        # Map tool name to short activity description
+        case "$TOOL_NAME" in
+            Read)
+                FNAME=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+                ACTIVITY="Reading ${FNAME##*/}"
+                ;;
+            Edit)
+                FNAME=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+                ACTIVITY="Editing ${FNAME##*/}"
+                ;;
+            Write)
+                FNAME=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+                ACTIVITY="Writing ${FNAME##*/}"
+                ;;
+            Bash)
+                CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+                if [[ ${#CMD} -gt 30 ]]; then
+                    CMD="${CMD:0:30}…"
+                fi
+                ACTIVITY="$ ${CMD}"
+                ;;
+            Grep)
+                PATTERN=$(echo "$INPUT" | jq -r '.tool_input.pattern // empty' 2>/dev/null)
+                ACTIVITY="Searching: ${PATTERN}"
+                ;;
+            Glob)
+                PATTERN=$(echo "$INPUT" | jq -r '.tool_input.pattern // empty' 2>/dev/null)
+                ACTIVITY="Finding: ${PATTERN}"
+                ;;
+            Task)
+                DESC=$(echo "$INPUT" | jq -r '.tool_input.description // empty' 2>/dev/null)
+                ACTIVITY="Agent: ${DESC}"
+                ;;
+            WebSearch)
+                QUERY=$(echo "$INPUT" | jq -r '.tool_input.query // empty' 2>/dev/null)
+                ACTIVITY="Searching: ${QUERY}"
+                ;;
+            WebFetch)
+                ACTIVITY="Fetching web page"
+                ;;
+            *)
+                ACTIVITY="$TOOL_NAME"
+                ;;
+        esac
+
+        NOW=$(date +%s)
+        jq --arg activity "$ACTIVITY" --argjson ts "$NOW" \
+            '.activity = $activity | .last_update = $ts' "$FILE" > "${FILE}.tmp" \
+            && mv "${FILE}.tmp" "$FILE"
         ;;
 
     session_end)
