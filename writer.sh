@@ -279,11 +279,15 @@ case "$EVENT" in
     session_end)
         INPUT=$(cat)
         SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
-        if [[ -z "$SESSION_ID" ]]; then
-            exit 0
-        fi
+        [[ -z "$SESSION_ID" ]] && exit 0
 
-        rm -f "$SESSIONS_DIR/${SESSION_ID}.json"
+        FILE="$SESSIONS_DIR/${SESSION_ID}.json"
+        if [[ -f "$FILE" ]]; then
+            NOW=$(date +%s)
+            jq --argjson ts "$NOW" \
+                '.status = "inactive" | .last_update = $ts | .activity = "Exited" | .stopped = true | .pid = 0' \
+                "$FILE" > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
+        fi
         ;;
 
     *)

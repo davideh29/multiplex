@@ -22,20 +22,15 @@ for f in "$SESSIONS_DIR"/*.json; do
     pid=$(jq -r '.pid // 0' "$f" 2>/dev/null) || continue
     tmux_pane=$(jq -r '.tmux_pane // empty' "$f" 2>/dev/null) || continue
 
-    # PID check
-    if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
-        continue
-    fi
-
-    # tmux pane check
+    # tmux pane check — primary authority for visibility
     if [[ -n "$tmux_pane" ]] && ! tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
         continue
     fi
 
-    # Staleness check
+    # Staleness — only for sessions without pane info
     last_update=$(jq -r '.last_update // 0' "$f" 2>/dev/null) || continue
     age=$((now - last_update))
-    if [[ "$age" -gt "$STALE_REMOVE" ]]; then
+    if [[ -z "$tmux_pane" && "$age" -gt "$STALE_REMOVE" ]]; then
         continue
     fi
 

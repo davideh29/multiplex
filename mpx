@@ -27,29 +27,49 @@ cleanup_session() {
 
 check_session_alive() {
     local file="$1"
-    local pid tmux_pane
+    local pid tmux_pane status
 
     pid=$(jq -r '.pid // 0' "$file" 2>/dev/null) || return 1
     tmux_pane=$(jq -r '.tmux_pane // empty' "$file" 2>/dev/null) || return 1
+    status=$(jq -r '.status // "active"' "$file" 2>/dev/null) || return 1
 
-    # PID check — hide but don't delete (transient failures possible)
+    # tmux pane is the PRIMARY authority for visibility
+    if [[ -n "$tmux_pane" ]]; then
+        if tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
+            # Pane alive — session is always visible
+            # If Claude PID is dead, one-shot update status to inactive
+            if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
+                if [[ "$status" == "active" ]]; then
+                    local now
+                    now=$(date +%s)
+                    jq --argjson ts "$now" \
+                        '.status = "inactive" | .activity = "Claude not running" | .pid = 0' \
+                        "$file" > "${file}.tmp" && mv "${file}.tmp" "$file" 2>/dev/null || true
+                fi
+            fi
+            return 0
+        fi
+
+        # Pane is dead — only delete if also stale
+        local last_update now age
+        last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null) || last_update=0
+        now=$(date +%s)
+        age=$((now - last_update))
+        if [[ "$age" -gt "$STALE_REMOVE" ]]; then
+            cleanup_session "$file"
+        fi
+        return 1
+    fi
+
+    # No pane info — fall back to PID + staleness (legacy/edge case)
     if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
-        return 1
-    fi
-
-    # tmux pane check — hide but don't delete (tmux can be transiently busy)
-    if [[ -n "$tmux_pane" ]] && ! tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
-        return 1
-    fi
-
-    # Staleness check
-    local last_update now age
-    last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null) || return 0
-    now=$(date +%s)
-    age=$((now - last_update))
-
-    if [[ "$age" -gt "$STALE_REMOVE" ]]; then
-        cleanup_session "$file"
+        local last_update now age
+        last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null) || last_update=0
+        now=$(date +%s)
+        age=$((now - last_update))
+        if [[ "$age" -gt "$STALE_REMOVE" ]]; then
+            cleanup_session "$file"
+        fi
         return 1
     fi
 
@@ -193,6 +213,11 @@ render() {
                 color="$BLUE"
                 indicator="●"
                 status_text="done"
+                ;;
+            inactive)
+                color="$DIM"
+                indicator="○"
+                status_text="inactive"
                 ;;
             *)
                 color="$DIM"
