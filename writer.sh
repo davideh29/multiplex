@@ -278,7 +278,7 @@ case "$EVENT" in
 
         NOW=$(date +%s)
         jq --arg activity "$ACTIVITY" --argjson ts "$NOW" \
-            '.activity = $activity | .last_update = $ts' "$FILE" > "${FILE}.tmp" \
+            '.activity = $activity | .last_update = $ts | .status = "active" | .stopped = false' "$FILE" > "${FILE}.tmp" \
             && mv "${FILE}.tmp" "$FILE"
         ;;
 

@@ -23,6 +23,10 @@ for f in "$SESSIONS_DIR"/*.json; do
     # Skip the current session
     [[ "$tmux_session" == "$current_session" ]] && continue
 
+    # Skip inactive (exited) sessions — they'll be cleaned up shortly
+    status=$(jq -r '.status // "active"' "$f" 2>/dev/null) || continue
+    [[ "$status" == "inactive" ]] && continue
+
     # tmux pane check — primary authority for visibility
     if [[ -n "$tmux_pane" ]] && ! tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
         continue

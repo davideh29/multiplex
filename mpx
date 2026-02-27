@@ -9,6 +9,7 @@ SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
 mkdir -p "$SESSIONS_DIR"
 
 STALE_REMOVE=600         # 10 minutes — auto-remove stale sessions
+INACTIVE_TIMEOUT=60      # 60 seconds — auto-remove exited sessions even if pane alive
 
 # ANSI colors
 RED='\033[0;31m'
@@ -41,7 +42,18 @@ check_session_alive() {
     # tmux pane is the PRIMARY authority for visibility
     if [[ -n "$tmux_pane" ]]; then
         if tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
-            # Pane alive — session is always visible
+            # Pane alive — but inactive sessions should auto-expire
+            if [[ "$status" == "inactive" ]]; then
+                local last_update now age
+                last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null) || last_update=0
+                now=$(date +%s)
+                age=$((now - last_update))
+                if [[ "$age" -gt "$INACTIVE_TIMEOUT" ]]; then
+                    cleanup_session "$file"
+                    return 1
+                fi
+                return 0  # still within timeout, show briefly
+            fi
             # If Claude PID is dead, one-shot update status to inactive
             if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
                 if [[ "$status" == "active" ]]; then
@@ -192,19 +204,40 @@ render() {
         local age_str
         age_str=$(format_age "$age")
 
+        # CPU-activity display override for inference detection
+        local display_status="$status"
+        local display_activity="$activity"
+        local sid
+        sid=$(jq -r '.session_id // empty' "$file" 2>/dev/null)
+        local file_pid
+        file_pid=$(jq -r '.pid // 0' "$file" 2>/dev/null)
+        if [[ "$file_pid" -gt 0 ]]; then
+            local cpu_now
+            cpu_now=$(get_cpu_time "$file_pid")
+            local prev_cpu="${PREV_CPU_TIMES[$sid]:-0}"
+            PREV_CPU_TIMES[$sid]="$cpu_now"
+            local cpu_delta=$((cpu_now - prev_cpu))
+            if [[ "$prev_cpu" -gt 0 && "$cpu_delta" -gt 0 ]]; then
+                if [[ "$display_status" == "waiting" || "$display_status" == "done" ]]; then
+                    display_status="active"
+                    display_activity="Thinking..."
+                fi
+            fi
+        fi
+
         # Truncate project name
         if [[ ${#project} -gt 20 ]]; then
             project="${project:0:19}…"
         fi
 
         # Truncate activity
-        if [[ ${#activity} -gt 25 ]]; then
-            activity="${activity:0:24}…"
+        if [[ ${#display_activity} -gt 25 ]]; then
+            display_activity="${display_activity:0:24}…"
         fi
 
         # Color and indicator based on status and staleness
         local color indicator status_text
-        case "$status" in
+        case "$display_status" in
             waiting)
                 color="$RED"
                 indicator="●"
@@ -228,7 +261,7 @@ render() {
             *)
                 color="$DIM"
                 indicator="?"
-                status_text="$status"
+                status_text="$display_status"
                 ;;
         esac
 
@@ -242,10 +275,10 @@ render() {
         printf '\033[2K'
         if [[ "$is_current" == true ]]; then
             printf "${BOLD} >%-3s %-20s ${color}${indicator} %-8s${RESET}${BOLD} %-8s %-10s ${DIM}%s${RESET}\n" \
-                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
+                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$display_activity"
         else
             printf "  %-3s %-20s ${color}${indicator} %-8s${RESET} %-8s %-10s ${DIM}%s${RESET}\n" \
-                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
+                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$display_activity"
         fi
         ((lines++))
 
@@ -307,6 +340,22 @@ fi
 clear
 ORDERED_FILES=()
 LAST_LINES=0
+declare -A PREV_CPU_TIMES
+
+get_cpu_time() {
+    local pid="$1"
+    if [[ "$pid" -gt 0 ]] && [[ -f "/proc/$pid/stat" ]]; then
+        local stat
+        stat=$(< "/proc/$pid/stat") 2>/dev/null || { echo 0; return; }
+        # Fields 14 (utime) and 15 (stime) in /proc/PID/stat
+        local utime stime
+        utime=$(echo "$stat" | awk '{print $14}')
+        stime=$(echo "$stat" | awk '{print $15}')
+        echo $(( utime + stime ))
+    else
+        echo 0
+    fi
+}
 
 while true; do
     render
