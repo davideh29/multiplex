@@ -125,6 +125,19 @@ case "$EVENT" in
             exit 0
         fi
 
+        # Clean up ghost sessions from the same tmux pane
+        PANE="${TMUX_PANE:-}"
+        if [[ -n "$PANE" ]]; then
+            for old_file in "$SESSIONS_DIR"/*.json; do
+                [[ -f "$old_file" ]] || continue
+                old_pane=$(jq -r '.tmux_pane // empty' "$old_file" 2>/dev/null) || continue
+                old_sid=$(jq -r '.session_id // empty' "$old_file" 2>/dev/null) || continue
+                if [[ "$old_pane" == "$PANE" && "$old_sid" != "$SESSION_ID" ]]; then
+                    rm -f "$old_file"
+                fi
+            done
+        fi
+
         CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
         PROJECT=$(echo "${CWD:-unknown}" | sed 's|.*/\([^/]*/[^/]*\)$|\1|')
         PID=$(find_claude_pid)

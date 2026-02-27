@@ -78,12 +78,39 @@ render() {
     now=$(date +%s)
 
     # Collect and validate sessions
-    local -a session_files=()
+    local -a session_files_raw=()
     for f in "$SESSIONS_DIR"/*.json; do
         [[ -f "$f" ]] || continue
         if check_session_alive "$f"; then
-            session_files+=("$f")
+            session_files_raw+=("$f")
         fi
+    done
+
+    # Deduplicate by tmux_pane — keep newest per pane, remove ghosts
+    declare -A pane_best_file pane_best_ts
+    for f in "${session_files_raw[@]}"; do
+        local pane ts
+        pane=$(jq -r '.tmux_pane // empty' "$f" 2>/dev/null) || continue
+        ts=$(jq -r '.last_update // 0' "$f" 2>/dev/null) || continue
+        if [[ -z "$pane" ]]; then
+            # No pane info — keep it
+            pane="__nopane_${f}"
+        fi
+        if [[ -z "${pane_best_ts[$pane]:-}" || "$ts" -gt "${pane_best_ts[$pane]}" ]]; then
+            # Clean up the previous best if it's being replaced
+            if [[ -n "${pane_best_file[$pane]:-}" && "${pane_best_file[$pane]}" != "$f" ]]; then
+                rm -f "${pane_best_file[$pane]}"
+            fi
+            pane_best_file[$pane]="$f"
+            pane_best_ts[$pane]="$ts"
+        else
+            # This file is the older duplicate — remove it
+            rm -f "$f"
+        fi
+    done
+    local -a session_files=()
+    for f in "${pane_best_file[@]}"; do
+        session_files+=("$f")
     done
 
     # Header
