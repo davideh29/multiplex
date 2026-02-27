@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+# mpx — Multiplex interactive session monitor
+# Displays all active Claude Code sessions and allows switching between them.
+# Run in a tmux pane: tmux split-window -v -l 10 mpx
+
+set -uo pipefail
+
+SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
+mkdir -p "$SESSIONS_DIR"
+
+STALE_THRESHOLD=120      # seconds before marking as stale
+STALE_REMOVE=600         # 10 minutes — auto-remove stale sessions
+
+# ANSI colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+DIM='\033[2m'
+BOLD='\033[1m'
+RESET='\033[0m'
+WHITE='\033[1;37m'
+CYAN='\033[0;36m'
+
+cleanup_session() {
+    local file="$1"
+    rm -f "$file"
+}
+
+check_session_alive() {
+    local file="$1"
+    local pid tmux_pane
+
+    pid=$(jq -r '.pid // 0' "$file" 2>/dev/null) || return 1
+    tmux_pane=$(jq -r '.tmux_pane // empty' "$file" 2>/dev/null) || return 1
+
+    # PID check
+    if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
+        cleanup_session "$file"
+        return 1
+    fi
+
+    # tmux pane check
+    if [[ -n "$tmux_pane" ]] && ! tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
+        cleanup_session "$file"
+        return 1
+    fi
+
+    # Staleness check
+    local last_update now age
+    last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null) || return 0
+    now=$(date +%s)
+    age=$((now - last_update))
+
+    if [[ "$age" -gt "$STALE_REMOVE" ]]; then
+        cleanup_session "$file"
+        return 1
+    fi
+
+    return 0
+}
+
+format_age() {
+    local seconds="$1"
+    if [[ "$seconds" -lt 60 ]]; then
+        echo "${seconds}s ago"
+    elif [[ "$seconds" -lt 3600 ]]; then
+        echo "$((seconds / 60))m ago"
+    else
+        echo "$((seconds / 3600))h ago"
+    fi
+}
+
+render() {
+    # Move cursor to top-left instead of clearing — eliminates flicker
+    printf '\033[H'
+
+    local now lines=0
+    now=$(date +%s)
+
+    # Collect and validate sessions
+    local -a session_files=()
+    for f in "$SESSIONS_DIR"/*.json; do
+        [[ -f "$f" ]] || continue
+        if check_session_alive "$f"; then
+            session_files+=("$f")
+        fi
+    done
+
+    # Header
+    printf '\033[2K'; echo -e "${BOLD}${WHITE} MULTIPLEX${RESET}"; ((lines++))
+    printf '\033[2K'; echo -e "${DIM} ──────────────────────────────────────────────────${RESET}"; ((lines++))
+
+    if [[ ${#session_files[@]} -eq 0 ]]; then
+        printf '\033[2K'; echo ""; ((lines++))
+        printf '\033[2K'; echo -e "${DIM}  No active sessions${RESET}"; ((lines++))
+        printf '\033[2K'; echo ""; ((lines++))
+        printf '\033[2K'; echo -e "${DIM} ──────────────────────────────────────────────────${RESET}"; ((lines++))
+        printf '\033[2K'; echo -e "${DIM}  q to quit${RESET}"; ((lines++))
+        # Erase any leftover lines from previous render
+        printf '\033[J'
+        LAST_LINES=$lines
+        return
+    fi
+
+    # Build sortable entries: sort_key|file_path
+    # Priority: waiting=0, done=1, active=2 (waiting first, then done, then active)
+    local -a sort_entries=()
+    for f in "${session_files[@]}"; do
+        local status
+        status=$(jq -r '.status // "active"' "$f" 2>/dev/null) || continue
+        local sort_key
+        case "$status" in
+            waiting) sort_key=0 ;;
+            done)    sort_key=1 ;;
+            active)  sort_key=2 ;;
+            *)       sort_key=3 ;;
+        esac
+        sort_entries+=("${sort_key}|${f}")
+    done
+
+    # Sort entries
+    IFS=$'\n' sorted=($(printf '%s\n' "${sort_entries[@]}" | sort)); unset IFS
+
+    # Table header
+    printf '\033[2K'
+    printf "  ${DIM}%-3s %-16s %-10s %-8s %s${RESET}\n" "#" "PROJECT" "STATUS" "CTX %" "UPDATED"
+    ((lines++))
+
+    # Store ordered file paths for keypress lookup
+    ORDERED_FILES=()
+
+    local idx=1
+    for entry in "${sorted[@]}"; do
+        local file="${entry#*|}"
+        ORDERED_FILES+=("$file")
+
+        local project status ctx_pct last_update
+        project=$(jq -r '.project // "?"' "$file" 2>/dev/null)
+        status=$(jq -r '.status // "?"' "$file" 2>/dev/null)
+        ctx_pct=$(jq -r '.context_pct // 0' "$file" 2>/dev/null)
+        last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null)
+
+        local age=$((now - last_update))
+        local age_str
+        age_str=$(format_age "$age")
+
+        # Truncate project name
+        if [[ ${#project} -gt 16 ]]; then
+            project="${project:0:15}…"
+        fi
+
+        # Color and indicator based on status and staleness
+        local color indicator status_text
+        if [[ "$age" -gt "$STALE_THRESHOLD" ]]; then
+            color="$DIM"
+            indicator="?"
+            status_text="$status"
+        else
+            case "$status" in
+                waiting)
+                    color="$RED"
+                    indicator="●"
+                    status_text="waiting"
+                    ;;
+                active)
+                    color="$GREEN"
+                    indicator="●"
+                    status_text="active"
+                    ;;
+                done)
+                    color="$BLUE"
+                    indicator="●"
+                    status_text="done"
+                    ;;
+                *)
+                    color="$DIM"
+                    indicator="?"
+                    status_text="$status"
+                    ;;
+            esac
+        fi
+
+        local ctx_int="${ctx_pct%.*}"
+        printf '\033[2K'
+        printf "  %-3s %-16s ${color}${indicator} %-8s${RESET} %-8s %s\n" \
+            "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str"
+        ((lines++))
+
+        idx=$((idx + 1))
+    done
+
+    printf '\033[2K'; echo -e "${DIM} ──────────────────────────────────────────────────${RESET}"; ((lines++))
+    printf '\033[2K'; echo -e "${DIM}  Press 1-9 to switch │ q to quit${RESET}"; ((lines++))
+
+    # Erase any leftover lines below (e.g. if session count decreased)
+    printf '\033[J'
+    LAST_LINES=$lines
+}
+
+switch_to_session() {
+    local file="$1"
+
+    local tmux_pane tmux_session tmux_window
+    tmux_pane=$(jq -r '.tmux_pane // empty' "$file" 2>/dev/null)
+    tmux_session=$(jq -r '.tmux_session // empty' "$file" 2>/dev/null)
+    tmux_window=$(jq -r '.tmux_window // empty' "$file" 2>/dev/null)
+
+    if [[ -z "$tmux_pane" ]]; then
+        return 1
+    fi
+
+    if [[ -n "$tmux_session" ]]; then
+        tmux switch-client -t "$tmux_session" 2>/dev/null || true
+        if [[ -n "$tmux_window" ]]; then
+            tmux select-window -t "${tmux_session}:${tmux_window}" 2>/dev/null || true
+        fi
+    fi
+    tmux select-pane -t "$tmux_pane" 2>/dev/null || true
+}
+
+# Hide cursor, restore on exit
+tput civis 2>/dev/null || true
+trap 'tput cnorm 2>/dev/null || true; exit 0' EXIT INT TERM
+
+clear
+ORDERED_FILES=()
+LAST_LINES=0
+
+while true; do
+    render
+
+    # read -t 1 doubles as refresh interval
+    if read -rsn1 -t 1 key 2>/dev/null; then
+        case "$key" in
+            q|Q)
+                exit 0
+                ;;
+            [1-9])
+                local_idx=$((key - 1))
+                if [[ "$local_idx" -lt "${#ORDERED_FILES[@]}" ]]; then
+                    switch_to_session "${ORDERED_FILES[$local_idx]}"
+                fi
+                ;;
+        esac
+    fi
+done
