@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# mpx-summarize — Background daemon that generates LLM-powered session summaries
+# Loops every ~15 seconds, reads each active session's JSONL transcript,
+# extracts user messages, sends them to ollama, and writes the summary
+# back into the session JSON file.
+
+set -uo pipefail
+
+SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CACHE_DIR="$SCRIPT_DIR/.summary-cache"
+mkdir -p "$CACHE_DIR"
+
+MODEL="${MPX_SUMMARY_MODEL:-qwen2.5:0.5b}"
+OLLAMA_URL="${MPX_OLLAMA_URL:-http://localhost:11434}"
+
+PROMPT='In max 10 words, what is this coding session doing? Output only the summary.
+
+User messages:'
+
+# Map session cwd to JSONL transcript path
+find_jsonl() {
+    local cwd="$1" session_id="$2"
+    # Claude stores transcripts at ~/.claude/projects/{encoded-path}/{session_id}.jsonl
+    # where encoded-path replaces / with -
+    local encoded
+    encoded=$(echo "$cwd" | sed 's|^/||; s|/|-|g')
+    local jsonl="$HOME/.claude/projects/-${encoded}/${session_id}.jsonl"
+    if [[ -f "$jsonl" ]]; then
+        echo "$jsonl"
+    fi
+}
+
+summarize_session() {
+    local file="$1"
+
+    local session_id cwd
+    session_id=$(jq -r '.session_id // empty' "$file" 2>/dev/null) || return
+    cwd=$(jq -r '.cwd // empty' "$file" 2>/dev/null) || return
+
+    if [[ -z "$session_id" || -z "$cwd" ]]; then
+        return
+    fi
+
+    # Find JSONL transcript
+    local jsonl
+    jsonl=$(find_jsonl "$cwd" "$session_id")
+    if [[ -z "$jsonl" || ! -f "$jsonl" ]]; then
+        return
+    fi
+
+    # Skip if file size unchanged since last run
+    local current_size cache_file
+    current_size=$(stat -c%s "$jsonl" 2>/dev/null) || return
+    cache_file="$CACHE_DIR/${session_id}.size"
+    if [[ -f "$cache_file" ]]; then
+        local prev_size
+        prev_size=$(cat "$cache_file" 2>/dev/null)
+        if [[ "$current_size" == "$prev_size" ]]; then
+            return
+        fi
+    fi
+
+    # Extract key user messages
+    local context
+    context=$(python3 "$SCRIPT_DIR/summarize-extract.py" "$jsonl" 2>/dev/null)
+    if [[ -z "$context" ]]; then
+        return
+    fi
+
+    # Call ollama
+    local response
+    response=$(curl -s --max-time 10 "${OLLAMA_URL}/api/generate" \
+        -d "$(jq -n \
+            --arg model "$MODEL" \
+            --arg prompt "${PROMPT}
+${context}" \
+            '{model: $model, prompt: $prompt, stream: false}')" 2>/dev/null)
+
+    if [[ -z "$response" ]]; then
+        return
+    fi
+
+    local summary
+    summary=$(echo "$response" | jq -r '.response // empty' 2>/dev/null)
+    if [[ -z "$summary" ]]; then
+        return
+    fi
+
+    # Clean up: strip quotes, newlines, cap at 80 chars
+    summary=$(echo "$summary" | tr '\n' ' ' | sed 's/^["\x27 ]*//; s/["\x27 ]*$//' | head -c 80)
+
+    if [[ -z "$summary" ]]; then
+        return
+    fi
+
+    # Write summary into session JSON (atomic update)
+    jq --arg summary "$summary" '.summary = $summary' "$file" > "${file}.tmp" \
+        && mv "${file}.tmp" "$file" 2>/dev/null
+
+    # Update size cache
+    echo "$current_size" > "$cache_file"
+}
+
+# Main loop
+while true; do
+    for f in "$SESSIONS_DIR"/*.json; do
+        [[ -f "$f" ]] || continue
+
+        # Only summarize active/waiting sessions
+        local_status=$(jq -r '.status // ""' "$f" 2>/dev/null) || continue
+        case "$local_status" in
+            active|waiting) ;;
+            *) continue ;;
+        esac
+
+        summarize_session "$f"
+    done
+
+    sleep 60
+done

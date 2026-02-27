@@ -57,14 +57,16 @@ case "$EVENT" in
 
         read -r PANE TSESS TWIN <<< "$(get_tmux_info)"
 
-        # Read existing session state (activity + protect done/waiting)
+        # Read existing session state (activity, summary + protect done/waiting)
         FILE="$SESSIONS_DIR/${SESSION_ID}.json"
         ACTIVITY=""
+        SUMMARY=""
         NEW_STATUS="active"
         if [[ -f "$FILE" ]]; then
             PREV_STATUS=$(jq -r '.status // "active"' "$FILE" 2>/dev/null) || true
             PREV_CTX=$(jq -r '.context_pct // -1' "$FILE" 2>/dev/null) || true
             ACTIVITY=$(jq -r '.activity // empty' "$FILE" 2>/dev/null) || true
+            SUMMARY=$(jq -r '.summary // empty' "$FILE" 2>/dev/null) || true
             STOPPED=$(jq -r '.stopped // false' "$FILE" 2>/dev/null) || true
             CREATED_AT=$(jq -r '.created_at // empty' "$FILE" 2>/dev/null) || true
             if [[ "$STOPPED" != "true" ]]; then
@@ -95,6 +97,7 @@ case "$EVENT" in
             --arg tsess "$TSESS" \
             --arg twin "$TWIN" \
             --arg activity "$ACTIVITY" \
+            --arg summary "$SUMMARY" \
             '{
                 session_id: $sid,
                 project: $project,
@@ -109,6 +112,7 @@ case "$EVENT" in
                 tmux_session: $tsess,
                 tmux_window: $twin,
                 activity: $activity,
+                summary: $summary,
                 stopped: false
             }' > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
 
@@ -194,6 +198,7 @@ case "$EVENT" in
             --arg tsess "$TSESS" \
             --arg twin "$TWIN" \
             --arg activity "Starting..." \
+            --arg summary "" \
             '{
                 session_id: $sid,
                 project: $project,
@@ -207,7 +212,8 @@ case "$EVENT" in
                 tmux_pane: $pane,
                 tmux_session: $tsess,
                 tmux_window: $twin,
-                activity: $activity
+                activity: $activity,
+                summary: $summary
             }' > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
         ;;
 
