@@ -217,7 +217,7 @@ render() {
             local prev_cpu="${PREV_CPU_TIMES[$sid]:-0}"
             PREV_CPU_TIMES[$sid]="$cpu_now"
             local cpu_delta=$((cpu_now - prev_cpu))
-            if [[ "$prev_cpu" -gt 0 && "$cpu_delta" -gt 0 ]]; then
+            if [[ "$prev_cpu" -gt 0 && "$cpu_delta" -gt 10 ]]; then
                 if [[ "$display_status" == "waiting" || "$display_status" == "done" ]]; then
                     display_status="active"
                     display_activity="Thinking..."

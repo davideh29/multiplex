@@ -69,11 +69,11 @@ case "$EVENT" in
             SUMMARY=$(jq -r '.summary // empty' "$FILE" 2>/dev/null) || true
             STOPPED=$(jq -r '.stopped // false' "$FILE" 2>/dev/null) || true
             CREATED_AT=$(jq -r '.created_at // empty' "$FILE" 2>/dev/null) || true
-            if [[ "$STOPPED" != "true" ]]; then
-                if [[ "$PREV_STATUS" == "done" || "$PREV_STATUS" == "waiting" ]]; then
-                    if [[ "${CONTEXT_PCT%.*}" == "${PREV_CTX%.*}" ]]; then
-                        NEW_STATUS="$PREV_STATUS"
-                    fi
+            if [[ "$STOPPED" == "true" ]]; then
+                NEW_STATUS="$PREV_STATUS"
+            elif [[ "$PREV_STATUS" == "done" || "$PREV_STATUS" == "waiting" ]]; then
+                if [[ "${CONTEXT_PCT%.*}" == "${PREV_CTX%.*}" ]]; then
+                    NEW_STATUS="$PREV_STATUS"
                 fi
             fi
         fi
