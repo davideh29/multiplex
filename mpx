@@ -95,7 +95,7 @@ render() {
         printf '\033[2K'; echo -e "${DIM}  No active sessions${RESET}"; ((lines++))
         printf '\033[2K'; echo ""; ((lines++))
         printf '\033[2K'; echo -e "${DIM} ──────────────────────────────────────────────────${RESET}"; ((lines++))
-        printf '\033[2K'; echo -e "${DIM}  q to quit${RESET}"; ((lines++))
+        printf '\033[2K'; echo -e "${DIM}  n new workspace │ q quit${RESET}"; ((lines++))
         # Erase any leftover lines from previous render
         printf '\033[J'
         LAST_LINES=$lines
@@ -190,7 +190,7 @@ render() {
     done
 
     printf '\033[2K'; echo -e "${DIM} ──────────────────────────────────────────────────${RESET}"; ((lines++))
-    printf '\033[2K'; echo -e "${DIM}  Press 1-9 to switch │ q to quit${RESET}"; ((lines++))
+    printf '\033[2K'; echo -e "${DIM}  1-9 switch │ n new workspace │ q quit${RESET}"; ((lines++))
 
     # Erase any leftover lines below (e.g. if session count decreased)
     printf '\033[J'
@@ -240,6 +240,10 @@ while true; do
                 if [[ "$local_idx" -lt "${#ORDERED_FILES[@]}" ]]; then
                     switch_to_session "${ORDERED_FILES[$local_idx]}"
                 fi
+                ;;
+            n|N)
+                SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+                "$SCRIPT_DIR/tmpx" &
                 ;;
         esac
     fi

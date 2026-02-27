@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# mpx-switch — Switch to the Nth multiplex session (matches mpx TUI ordering)
+# Used by tmux keybindings: bind 1 run-shell -b "mpx-switch 1"
+
+set -uo pipefail
+
+SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
+TARGET="${1:-}"
+
+if [[ -z "$TARGET" ]] || [[ "$TARGET" -lt 1 ]] || [[ "$TARGET" -gt 9 ]]; then
+    exit 1
+fi
+
+STALE_REMOVE=600
+now=$(date +%s)
+
+# Build sorted list matching mpx's ordering
+entries=()
+for f in "$SESSIONS_DIR"/*.json; do
+    [[ -f "$f" ]] || continue
+
+    pid=$(jq -r '.pid // 0' "$f" 2>/dev/null) || continue
+    tmux_pane=$(jq -r '.tmux_pane // empty' "$f" 2>/dev/null) || continue
+
+    # PID check
+    if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
+        continue
+    fi
+
+    # tmux pane check
+    if [[ -n "$tmux_pane" ]] && ! tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
+        continue
+    fi
+
+    # Staleness check
+    last_update=$(jq -r '.last_update // 0' "$f" 2>/dev/null) || continue
+    age=$((now - last_update))
+    if [[ "$age" -gt "$STALE_REMOVE" ]]; then
+        continue
+    fi
+
+    # Sort key matching mpx: waiting=0, done=1, active=2
+    status=$(jq -r '.status // "active"' "$f" 2>/dev/null) || continue
+    case "$status" in
+        waiting) sort_key=0 ;;
+        done)    sort_key=1 ;;
+        active)  sort_key=2 ;;
+        *)       sort_key=3 ;;
+    esac
+
+    entries+=("${sort_key}|${f}")
+done
+
+if [[ ${#entries[@]} -eq 0 ]]; then
+    exit 0
+fi
+
+IFS=$'\n' sorted=($(printf '%s\n' "${entries[@]}" | sort)); unset IFS
+
+idx=$((TARGET - 1))
+if [[ "$idx" -ge "${#sorted[@]}" ]]; then
+    exit 0
+fi
+
+file="${sorted[$idx]#*|}"
+
+tmux_session=$(jq -r '.tmux_session // empty' "$file" 2>/dev/null)
+tmux_window=$(jq -r '.tmux_window // empty' "$file" 2>/dev/null)
+tmux_pane=$(jq -r '.tmux_pane // empty' "$file" 2>/dev/null)
+
+if [[ -n "$tmux_session" ]]; then
+    tmux switch-client -t "$tmux_session" 2>/dev/null || true
+    if [[ -n "$tmux_window" ]]; then
+        tmux select-window -t "${tmux_session}:${tmux_window}" 2>/dev/null || true
+    fi
+fi
+
+if [[ -n "$tmux_pane" ]]; then
+    tmux select-pane -t "$tmux_pane" 2>/dev/null || true
+fi

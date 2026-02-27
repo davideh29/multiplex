@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# tmpx — Start a new multiplex workspace session
+# Layout: Claude (left) | dagflow-tui (top-right) | mpx (bottom-right)
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Determine session name
+if [[ -n "${1:-}" ]]; then
+    SESSION_NAME="$1"
+else
+    # Auto-increment: find next available tmpx-N
+    n=1
+    while tmux has-session -t "tmpx-${n}" 2>/dev/null; do
+        ((n++))
+    done
+    SESSION_NAME="tmpx-${n}"
+fi
+
+# Create the session (detached)
+tmux new-session -d -s "$SESSION_NAME"
+
+# Split right pane at 40% width
+tmux split-window -h -t "${SESSION_NAME}:0" -l '40%'
+
+# Split right pane vertically — mpx on bottom at 35%
+tmux split-window -v -t "${SESSION_NAME}:0.1" -l '35%'
+
+# Launch dagflow-tui in top-right (pane 1)
+tmux send-keys -t "${SESSION_NAME}:0.1" 'dagflow-tui' C-m
+
+# Launch mpx in bottom-right (pane 2)
+tmux send-keys -t "${SESSION_NAME}:0.2" "${SCRIPT_DIR}/mpx" C-m
+
+# Focus the left pane for Claude
+tmux select-pane -t "${SESSION_NAME}:0.0"
+
+# Attach or switch
+if [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "$SESSION_NAME"
+else
+    tmux attach-session -t "$SESSION_NAME"
+fi
