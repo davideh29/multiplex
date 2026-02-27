@@ -1,2 +1,3 @@
 sessions/
 .summary-cache/
+__pycache__/
