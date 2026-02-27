@@ -51,7 +51,7 @@ case "$EVENT" in
         CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
         MODEL=$(echo "$INPUT" | jq -r '.model.display_name // .model.id // empty')
         CONTEXT_PCT=$(echo "$INPUT" | jq -r '.context_window.used_percentage // 0')
-        PROJECT=$(basename "${CWD:-unknown}")
+        PROJECT=$(echo "${CWD:-unknown}" | sed 's|.*/\([^/]*/[^/]*\)$|\1|')
         PID=$(find_claude_pid)
         NOW=$(date +%s)
 
@@ -126,7 +126,7 @@ case "$EVENT" in
         fi
 
         CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
-        PROJECT=$(basename "${CWD:-unknown}")
+        PROJECT=$(echo "${CWD:-unknown}" | sed 's|.*/\([^/]*/[^/]*\)$|\1|')
         PID=$(find_claude_pid)
         NOW=$(date +%s)
 
