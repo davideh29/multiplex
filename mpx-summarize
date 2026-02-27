@@ -11,10 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE_DIR="$SCRIPT_DIR/.summary-cache"
 mkdir -p "$CACHE_DIR"
 
-MODEL="${MPX_SUMMARY_MODEL:-qwen2.5:0.5b}"
+MODEL="${MPX_SUMMARY_MODEL:-qwen2.5:3b}"
 OLLAMA_URL="${MPX_OLLAMA_URL:-http://localhost:11434}"
 
-PROMPT='What is the overall project goal? Reply with ONLY a short phrase (max 8 words), no quotes, no preamble. Start with a verb like Adding, Fixing, Building, Implementing.
+PROMPT='What is the overall project goal? Reply with ONLY a short phrase (max 8 words), no quotes, no preamble. Start with a verb like Adding, Fixing, Building, Implementing. Be direct and concise — never say "adding a new feature to..." or "working on...", just state the action.
 
 User messages:'
 
