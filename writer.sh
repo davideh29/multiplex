@@ -277,9 +277,22 @@ case "$EVENT" in
         esac
 
         NOW=$(date +%s)
-        jq --arg activity "$ACTIVITY" --argjson ts "$NOW" \
-            '.activity = $activity | .last_update = $ts | .status = "active" | .stopped = false' "$FILE" > "${FILE}.tmp" \
-            && mv "${FILE}.tmp" "$FILE"
+
+        # Read current state to avoid overriding "waiting" mid-turn
+        PREV_STATUS=$(jq -r '.status // "active"' "$FILE" 2>/dev/null) || PREV_STATUS="active"
+        STOPPED=$(jq -r '.stopped // false' "$FILE" 2>/dev/null) || STOPPED="false"
+
+        if [[ "$PREV_STATUS" == "waiting" && "$STOPPED" == "false" ]]; then
+            # Mid-turn and already waiting for input — preserve waiting, just update activity/timestamp
+            jq --arg activity "$ACTIVITY" --argjson ts "$NOW" \
+                '.activity = $activity | .last_update = $ts' "$FILE" > "${FILE}.tmp" \
+                && mv "${FILE}.tmp" "$FILE"
+        else
+            # Normal: set active (covers stopped=true leftover and non-waiting states)
+            jq --arg activity "$ACTIVITY" --argjson ts "$NOW" \
+                '.activity = $activity | .last_update = $ts | .status = "active" | .stopped = false' "$FILE" > "${FILE}.tmp" \
+                && mv "${FILE}.tmp" "$FILE"
+        fi
         ;;
 
     session_end)

@@ -223,6 +223,24 @@ render() {
                     display_activity="Thinking..."
                 fi
             fi
+
+            # Idle detection: if active but no CPU, no children, no recent hooks → likely waiting for permission
+            local hook_age=$((now - last_update))
+            if [[ "$display_status" == "active" && "$cpu_delta" -le 2 && "$prev_cpu" -gt 0 && "$hook_age" -ge 3 ]]; then
+                local child_count
+                child_count=$(pgrep -cP "$file_pid" 2>/dev/null) || child_count=0
+                if [[ "$child_count" -eq 0 ]]; then
+                    IDLE_STREAK[$sid]=$(( ${IDLE_STREAK[$sid]:-0} + 1 ))
+                    if [[ "${IDLE_STREAK[$sid]}" -ge 2 ]]; then
+                        display_status="waiting"
+                        display_activity="Waiting for input"
+                    fi
+                else
+                    IDLE_STREAK[$sid]=0
+                fi
+            else
+                IDLE_STREAK[$sid]=0
+            fi
         fi
 
         # Truncate project name
@@ -341,6 +359,7 @@ clear
 ORDERED_FILES=()
 LAST_LINES=0
 declare -A PREV_CPU_TIMES
+declare -A IDLE_STREAK
 
 get_cpu_time() {
     local pid="$1"
