@@ -14,7 +14,7 @@ mkdir -p "$CACHE_DIR"
 MODEL="${MPX_SUMMARY_MODEL:-qwen2.5:0.5b}"
 OLLAMA_URL="${MPX_OLLAMA_URL:-http://localhost:11434}"
 
-PROMPT='In max 10 words, what is this coding session doing? Output only the summary.
+PROMPT='What is the overall project goal? Reply with ONLY a short phrase (max 8 words), no quotes, no preamble. Start with a verb like Adding, Fixing, Building, Implementing.
 
 User messages:'
 
