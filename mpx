@@ -8,7 +8,6 @@ set -uo pipefail
 SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
 mkdir -p "$SESSIONS_DIR"
 
-STALE_THRESHOLD=120      # seconds before marking as stale
 STALE_REMOVE=600         # 10 minutes — auto-remove stale sessions
 
 # ANSI colors
@@ -190,34 +189,28 @@ render() {
 
         # Color and indicator based on status and staleness
         local color indicator status_text
-        if [[ "$age" -gt "$STALE_THRESHOLD" ]]; then
-            color="$DIM"
-            indicator="?"
-            status_text="$status"
-        else
-            case "$status" in
-                waiting)
-                    color="$RED"
-                    indicator="●"
-                    status_text="waiting"
-                    ;;
-                active)
-                    color="$GREEN"
-                    indicator="●"
-                    status_text="active"
-                    ;;
-                done)
-                    color="$BLUE"
-                    indicator="●"
-                    status_text="done"
-                    ;;
-                *)
-                    color="$DIM"
-                    indicator="?"
-                    status_text="$status"
-                    ;;
-            esac
-        fi
+        case "$status" in
+            waiting)
+                color="$RED"
+                indicator="●"
+                status_text="waiting"
+                ;;
+            active)
+                color="$GREEN"
+                indicator="●"
+                status_text="active"
+                ;;
+            done)
+                color="$BLUE"
+                indicator="●"
+                status_text="done"
+                ;;
+            *)
+                color="$DIM"
+                indicator="?"
+                status_text="$status"
+                ;;
+        esac
 
         local ctx_int="${ctx_pct%.*}"
         printf '\033[2K'

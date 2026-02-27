@@ -57,11 +57,19 @@ case "$EVENT" in
 
         read -r PANE TSESS TWIN <<< "$(get_tmux_info)"
 
-        # Preserve existing activity field
+        # Read existing session state (activity + protect done/waiting)
         FILE="$SESSIONS_DIR/${SESSION_ID}.json"
         ACTIVITY=""
+        NEW_STATUS="active"
         if [[ -f "$FILE" ]]; then
+            PREV_STATUS=$(jq -r '.status // "active"' "$FILE" 2>/dev/null) || true
+            PREV_CTX=$(jq -r '.context_pct // -1' "$FILE" 2>/dev/null) || true
             ACTIVITY=$(jq -r '.activity // empty' "$FILE" 2>/dev/null) || true
+            if [[ "$PREV_STATUS" == "done" || "$PREV_STATUS" == "waiting" ]]; then
+                if [[ "${CONTEXT_PCT%.*}" == "${PREV_CTX%.*}" ]]; then
+                    NEW_STATUS="$PREV_STATUS"
+                fi
+            fi
         fi
 
         jq -n \
@@ -70,7 +78,7 @@ case "$EVENT" in
             --arg cwd "$CWD" \
             --arg model "$MODEL" \
             --argjson ctx "$CONTEXT_PCT" \
-            --arg status "active" \
+            --arg status "$NEW_STATUS" \
             --argjson ts "$NOW" \
             --argjson pid "$PID" \
             --arg pane "$PANE" \
@@ -122,8 +130,14 @@ case "$EVENT" in
         FILE="$SESSIONS_DIR/${SESSION_ID}.json"
         if [[ -f "$FILE" ]]; then
             NOW=$(date +%s)
-            jq --argjson ts "$NOW" '.status = "done" | .last_update = $ts | .activity = "Done"' "$FILE" > "${FILE}.tmp" \
-                && mv "${FILE}.tmp" "$FILE"
+            CURRENT_STATUS=$(jq -r '.status // "active"' "$FILE" 2>/dev/null) || true
+            if [[ "$CURRENT_STATUS" == "waiting" ]]; then
+                jq --argjson ts "$NOW" '.last_update = $ts' "$FILE" > "${FILE}.tmp" \
+                    && mv "${FILE}.tmp" "$FILE"
+            else
+                jq --argjson ts "$NOW" '.status = "done" | .last_update = $ts | .activity = "Done"' "$FILE" > "${FILE}.tmp" \
+                    && mv "${FILE}.tmp" "$FILE"
+            fi
         fi
         ;;
 
