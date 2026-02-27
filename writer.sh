@@ -65,9 +65,12 @@ case "$EVENT" in
             PREV_STATUS=$(jq -r '.status // "active"' "$FILE" 2>/dev/null) || true
             PREV_CTX=$(jq -r '.context_pct // -1' "$FILE" 2>/dev/null) || true
             ACTIVITY=$(jq -r '.activity // empty' "$FILE" 2>/dev/null) || true
-            if [[ "$PREV_STATUS" == "done" || "$PREV_STATUS" == "waiting" ]]; then
-                if [[ "${CONTEXT_PCT%.*}" == "${PREV_CTX%.*}" ]]; then
-                    NEW_STATUS="$PREV_STATUS"
+            STOPPED=$(jq -r '.stopped // false' "$FILE" 2>/dev/null) || true
+            if [[ "$STOPPED" != "true" ]]; then
+                if [[ "$PREV_STATUS" == "done" || "$PREV_STATUS" == "waiting" ]]; then
+                    if [[ "${CONTEXT_PCT%.*}" == "${PREV_CTX%.*}" ]]; then
+                        NEW_STATUS="$PREV_STATUS"
+                    fi
                 fi
             fi
         fi
@@ -97,8 +100,9 @@ case "$EVENT" in
                 tmux_pane: $pane,
                 tmux_session: $tsess,
                 tmux_window: $twin,
-                activity: $activity
-            }' > "$SESSIONS_DIR/${SESSION_ID}.json"
+                activity: $activity,
+                stopped: false
+            }' > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
 
         # Output status line text for Claude Code
         CTX_INT=${CONTEXT_PCT%.*}
@@ -132,10 +136,10 @@ case "$EVENT" in
             NOW=$(date +%s)
             CURRENT_STATUS=$(jq -r '.status // "active"' "$FILE" 2>/dev/null) || true
             if [[ "$CURRENT_STATUS" == "waiting" ]]; then
-                jq --argjson ts "$NOW" '.last_update = $ts' "$FILE" > "${FILE}.tmp" \
+                jq --argjson ts "$NOW" '.last_update = $ts | .stopped = true' "$FILE" > "${FILE}.tmp" \
                     && mv "${FILE}.tmp" "$FILE"
             else
-                jq --argjson ts "$NOW" '.status = "done" | .last_update = $ts | .activity = "Done"' "$FILE" > "${FILE}.tmp" \
+                jq --argjson ts "$NOW" '.status = "done" | .last_update = $ts | .activity = "Done" | .stopped = true' "$FILE" > "${FILE}.tmp" \
                     && mv "${FILE}.tmp" "$FILE"
             fi
         fi
@@ -165,6 +169,7 @@ case "$EVENT" in
         PROJECT=$(basename "${CWD:-unknown}")
         PID=$(find_claude_pid)
         NOW=$(date +%s)
+        FILE="$SESSIONS_DIR/${SESSION_ID}.json"
 
         read -r PANE TSESS TWIN <<< "$(get_tmux_info)"
 
@@ -194,7 +199,7 @@ case "$EVENT" in
                 tmux_session: $tsess,
                 tmux_window: $twin,
                 activity: $activity
-            }' > "$SESSIONS_DIR/${SESSION_ID}.json"
+            }' > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
         ;;
 
     tool_use)

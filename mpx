@@ -32,15 +32,13 @@ check_session_alive() {
     pid=$(jq -r '.pid // 0' "$file" 2>/dev/null) || return 1
     tmux_pane=$(jq -r '.tmux_pane // empty' "$file" 2>/dev/null) || return 1
 
-    # PID check
+    # PID check — hide but don't delete (transient failures possible)
     if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
-        cleanup_session "$file"
         return 1
     fi
 
-    # tmux pane check
+    # tmux pane check — hide but don't delete (tmux can be transiently busy)
     if [[ -n "$tmux_pane" ]] && ! tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
-        cleanup_session "$file"
         return 1
     fi
 
