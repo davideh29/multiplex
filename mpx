@@ -126,24 +126,20 @@ render() {
         return
     fi
 
-    # Build sortable entries: sort_key|file_path
-    # Priority: waiting=0, done=1, active=2 (waiting first, then done, then active)
+    # Build sortable entries by creation time (chronological, stable ordering)
     local -a sort_entries=()
     for f in "${session_files[@]}"; do
-        local status
-        status=$(jq -r '.status // "active"' "$f" 2>/dev/null) || continue
-        local sort_key
-        case "$status" in
-            waiting) sort_key=0 ;;
-            done)    sort_key=1 ;;
-            active)  sort_key=2 ;;
-            *)       sort_key=3 ;;
-        esac
-        sort_entries+=("${sort_key}|${f}")
+        local created_at
+        created_at=$(jq -r '.created_at // .last_update // 0' "$f" 2>/dev/null) || continue
+        sort_entries+=("${created_at}|${f}")
     done
 
-    # Sort entries
-    IFS=$'\n' sorted=($(printf '%s\n' "${sort_entries[@]}" | sort)); unset IFS
+    # Sort entries (numeric by timestamp — oldest first)
+    IFS=$'\n' sorted=($(printf '%s\n' "${sort_entries[@]}" | sort -n)); unset IFS
+
+    # Detect current tmux session for highlighting
+    local current_tmux_session
+    current_tmux_session=$(tmux display-message -p '#{session_name}' 2>/dev/null) || current_tmux_session=""
 
     # Table header
     printf '\033[2K'
@@ -158,12 +154,13 @@ render() {
         local file="${entry#*|}"
         ORDERED_FILES+=("$file")
 
-        local project status ctx_pct last_update activity
+        local project status ctx_pct last_update activity tmux_sess
         project=$(jq -r '.project // "?"' "$file" 2>/dev/null)
         status=$(jq -r '.status // "?"' "$file" 2>/dev/null)
         ctx_pct=$(jq -r '.context_pct // 0' "$file" 2>/dev/null)
         last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null)
         activity=$(jq -r '.activity // ""' "$file" 2>/dev/null)
+        tmux_sess=$(jq -r '.tmux_session // empty' "$file" 2>/dev/null)
 
         local age=$((now - last_update))
         local age_str
@@ -204,10 +201,21 @@ render() {
                 ;;
         esac
 
+        # Highlight current session
+        local is_current=false
+        if [[ -n "$current_tmux_session" && "$tmux_sess" == "$current_tmux_session" ]]; then
+            is_current=true
+        fi
+
         local ctx_int="${ctx_pct%.*}"
         printf '\033[2K'
-        printf "  %-3s %-20s ${color}${indicator} %-8s${RESET} %-8s %-10s ${DIM}%s${RESET}\n" \
-            "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
+        if [[ "$is_current" == true ]]; then
+            printf "${BOLD} >%-3s %-20s ${color}${indicator} %-8s${RESET}${BOLD} %-8s %-10s ${DIM}%s${RESET}\n" \
+                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
+        else
+            printf "  %-3s %-20s ${color}${indicator} %-8s${RESET} %-8s %-10s ${DIM}%s${RESET}\n" \
+                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
+        fi
         ((lines++))
 
         idx=$((idx + 1))

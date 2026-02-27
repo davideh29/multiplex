@@ -66,6 +66,7 @@ case "$EVENT" in
             PREV_CTX=$(jq -r '.context_pct // -1' "$FILE" 2>/dev/null) || true
             ACTIVITY=$(jq -r '.activity // empty' "$FILE" 2>/dev/null) || true
             STOPPED=$(jq -r '.stopped // false' "$FILE" 2>/dev/null) || true
+            CREATED_AT=$(jq -r '.created_at // empty' "$FILE" 2>/dev/null) || true
             if [[ "$STOPPED" != "true" ]]; then
                 if [[ "$PREV_STATUS" == "done" || "$PREV_STATUS" == "waiting" ]]; then
                     if [[ "${CONTEXT_PCT%.*}" == "${PREV_CTX%.*}" ]]; then
@@ -73,6 +74,11 @@ case "$EVENT" in
                     fi
                 fi
             fi
+        fi
+
+        # Fallback created_at to now if missing (pre-existing sessions)
+        if [[ -z "${CREATED_AT:-}" ]]; then
+            CREATED_AT="$NOW"
         fi
 
         jq -n \
@@ -83,6 +89,7 @@ case "$EVENT" in
             --argjson ctx "$CONTEXT_PCT" \
             --arg status "$NEW_STATUS" \
             --argjson ts "$NOW" \
+            --argjson created "$CREATED_AT" \
             --argjson pid "$PID" \
             --arg pane "$PANE" \
             --arg tsess "$TSESS" \
@@ -96,6 +103,7 @@ case "$EVENT" in
                 context_pct: $ctx,
                 status: $status,
                 last_update: $ts,
+                created_at: $created,
                 pid: $pid,
                 tmux_pane: $pane,
                 tmux_session: $tsess,
@@ -194,6 +202,7 @@ case "$EVENT" in
                 context_pct: $ctx,
                 status: $status,
                 last_update: $ts,
+                created_at: $ts,
                 pid: $pid,
                 tmux_pane: $pane,
                 tmux_session: $tsess,

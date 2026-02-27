@@ -39,23 +39,17 @@ for f in "$SESSIONS_DIR"/*.json; do
         continue
     fi
 
-    # Sort key matching mpx: waiting=0, done=1, active=2
-    status=$(jq -r '.status // "active"' "$f" 2>/dev/null) || continue
-    case "$status" in
-        waiting) sort_key=0 ;;
-        done)    sort_key=1 ;;
-        active)  sort_key=2 ;;
-        *)       sort_key=3 ;;
-    esac
+    # Sort by creation time (chronological, stable ordering)
+    created_at=$(jq -r '.created_at // .last_update // 0' "$f" 2>/dev/null) || continue
 
-    entries+=("${sort_key}|${f}")
+    entries+=("${created_at}|${f}")
 done
 
 if [[ ${#entries[@]} -eq 0 ]]; then
     exit 0
 fi
 
-IFS=$'\n' sorted=($(printf '%s\n' "${entries[@]}" | sort)); unset IFS
+IFS=$'\n' sorted=($(printf '%s\n' "${entries[@]}" | sort -n)); unset IFS
 
 idx=$((TARGET - 1))
 if [[ "$idx" -ge "${#sorted[@]}" ]]; then
