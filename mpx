@@ -149,7 +149,7 @@ render() {
 
     # Table header
     printf '\033[2K'
-    printf "  ${DIM}%-3s %-12s %-20s %-10s %-8s %-10s %s${RESET}\n" "#" "SESSION" "PROJECT" "STATUS" "CTX %" "UPDATED" "ACTIVITY"
+    printf "  ${DIM}%-3s %-20s %-10s %-8s %-10s %s${RESET}\n" "#" "PROJECT" "STATUS" "CTX %" "UPDATED" "ACTIVITY"
     ((lines++))
 
     # Store ordered file paths for keypress lookup
@@ -160,22 +160,16 @@ render() {
         local file="${entry#*|}"
         ORDERED_FILES+=("$file")
 
-        local project status ctx_pct last_update session activity
+        local project status ctx_pct last_update activity
         project=$(jq -r '.project // "?"' "$file" 2>/dev/null)
         status=$(jq -r '.status // "?"' "$file" 2>/dev/null)
         ctx_pct=$(jq -r '.context_pct // 0' "$file" 2>/dev/null)
         last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null)
-        session=$(jq -r '.tmux_session // "?"' "$file" 2>/dev/null)
         activity=$(jq -r '.activity // ""' "$file" 2>/dev/null)
 
         local age=$((now - last_update))
         local age_str
         age_str=$(format_age "$age")
-
-        # Truncate session name
-        if [[ ${#session} -gt 12 ]]; then
-            session="${session:0:11}…"
-        fi
 
         # Truncate project name
         if [[ ${#project} -gt 20 ]]; then
@@ -214,8 +208,8 @@ render() {
 
         local ctx_int="${ctx_pct%.*}"
         printf '\033[2K'
-        printf "  %-3s %-12s %-20s ${color}${indicator} %-8s${RESET} %-8s %-10s ${DIM}%s${RESET}\n" \
-            "$idx" "$session" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
+        printf "  %-3s %-20s ${color}${indicator} %-8s${RESET} %-8s %-10s ${DIM}%s${RESET}\n" \
+            "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
         ((lines++))
 
         idx=$((idx + 1))
