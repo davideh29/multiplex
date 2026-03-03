@@ -40,6 +40,18 @@ check_session_alive() {
     # tmux pane is the PRIMARY authority for visibility
     if [[ -n "$tmux_pane" ]]; then
         if tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
+            # Verify pane belongs to the expected tmux session
+            # (pane IDs can be reused after tmux server restart)
+            local expected_session
+            expected_session=$(jq -r '.tmux_session // empty' "$file" 2>/dev/null)
+            if [[ -n "$expected_session" ]]; then
+                local actual_session
+                actual_session=$(tmux display-message -p -t "$tmux_pane" '#{session_name}' 2>/dev/null) || actual_session=""
+                if [[ -n "$actual_session" && "$actual_session" != "$expected_session" ]]; then
+                    cleanup_session "$file"
+                    return 1
+                fi
+            fi
             # Pane alive — but inactive sessions should auto-expire
             if [[ "$status" == "inactive" ]]; then
                 local last_update now age
@@ -54,11 +66,10 @@ check_session_alive() {
             fi
             # If Claude PID is dead, one-shot update status to inactive
             if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
-                if [[ "$status" == "active" ]]; then
+                if [[ "$status" != "inactive" ]]; then
                     local now
                     now=$(date +%s)
-                    jq --argjson ts "$now" \
-                        '.status = "inactive" | .activity = "Claude not running" | .pid = 0' \
+                    jq '.status = "inactive" | .activity = "Exited" | .pid = 0' \
                         "$file" > "${file}.tmp" && mv "${file}.tmp" "$file" 2>/dev/null || true
                 fi
             fi
@@ -76,19 +87,18 @@ check_session_alive() {
         return 1
     fi
 
-    # No pane info — fall back to PID + staleness (legacy/edge case)
-    if [[ "$pid" -gt 0 ]] && ! kill -0 "$pid" 2>/dev/null; then
+    # No pane info — can't switch to this session, don't display.
+    # Clean up the file if no live process.
+    if [[ "$pid" -le 0 ]] || ! kill -0 "$pid" 2>/dev/null; then
         local last_update now age
         last_update=$(jq -r '.last_update // 0' "$file" 2>/dev/null) || last_update=0
         now=$(date +%s)
         age=$((now - last_update))
-        if [[ "$age" -gt "$STALE_REMOVE" ]]; then
+        if [[ "$age" -gt "$INACTIVE_TIMEOUT" ]]; then
             cleanup_session "$file"
         fi
-        return 1
     fi
-
-    return 0
+    return 1
 }
 
 format_age() {
@@ -161,15 +171,22 @@ render() {
         return
     fi
 
-    # Build sortable entries by creation time (chronological, stable ordering)
+    # Build sortable entries by status priority, then creation time
+    # Active/waiting get low numbers; done/inactive get pushed down
     local -a sort_entries=()
     for f in "${session_files[@]}"; do
-        local created_at
+        local created_at s_status priority
         created_at=$(jq -r '.created_at // .last_update // 0' "$f" 2>/dev/null) || continue
-        sort_entries+=("${created_at}|${f}")
+        s_status=$(jq -r '.status // "active"' "$f" 2>/dev/null) || s_status="active"
+        case "$s_status" in
+            active|waiting) priority=0 ;;
+            done)           priority=1 ;;
+            *)              priority=2 ;;
+        esac
+        sort_entries+=("${priority}${created_at}|${f}")
     done
 
-    # Sort entries (numeric by timestamp — oldest first)
+    # Sort entries (numeric — priority first, then oldest within each group)
     IFS=$'\n' sorted=($(printf '%s\n' "${sort_entries[@]}" | sort -n)); unset IFS
 
     # Detect current tmux session for highlighting
