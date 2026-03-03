@@ -21,8 +21,6 @@ RESET='\033[0m'
 WHITE='\033[1;37m'
 CYAN='\033[0;36m'
 
-SUMMARIZER_PID=""
-
 cleanup_session() {
     local file="$1"
     local sid
@@ -191,7 +189,7 @@ render() {
         local file="${entry#*|}"
         ORDERED_FILES+=("$file")
 
-        local project status ctx_pct last_update activity tmux_sess summary
+        local project status ctx_pct last_update activity tmux_sess summary subagent_count
         project=$(jq -r '.project // "?"' "$file" 2>/dev/null)
         status=$(jq -r '.status // "?"' "$file" 2>/dev/null)
         ctx_pct=$(jq -r '.context_pct // 0' "$file" 2>/dev/null)
@@ -199,49 +197,11 @@ render() {
         activity=$(jq -r '.activity // ""' "$file" 2>/dev/null)
         tmux_sess=$(jq -r '.tmux_session // empty' "$file" 2>/dev/null)
         summary=$(jq -r '.summary // ""' "$file" 2>/dev/null)
+        subagent_count=$(jq '(.subagents // {}) | length' "$file" 2>/dev/null) || subagent_count=0
 
         local age=$((now - last_update))
         local age_str
         age_str=$(format_age "$age")
-
-        # CPU-activity display override for inference detection
-        local display_status="$status"
-        local display_activity="$activity"
-        local sid
-        sid=$(jq -r '.session_id // empty' "$file" 2>/dev/null)
-        local file_pid
-        file_pid=$(jq -r '.pid // 0' "$file" 2>/dev/null)
-        if [[ "$file_pid" -gt 0 ]]; then
-            local cpu_now
-            cpu_now=$(get_cpu_time "$file_pid")
-            local prev_cpu="${PREV_CPU_TIMES[$sid]:-0}"
-            PREV_CPU_TIMES[$sid]="$cpu_now"
-            local cpu_delta=$((cpu_now - prev_cpu))
-            if [[ "$prev_cpu" -gt 0 && "$cpu_delta" -gt 10 ]]; then
-                if [[ "$display_status" == "waiting" || "$display_status" == "done" ]]; then
-                    display_status="active"
-                    display_activity="Thinking..."
-                fi
-            fi
-
-            # Idle detection: if active but no CPU, no children, no recent hooks → likely waiting for permission
-            local hook_age=$((now - last_update))
-            if [[ "$display_status" == "active" && "$cpu_delta" -le 2 && "$prev_cpu" -gt 0 && "$hook_age" -ge 3 ]]; then
-                local child_count
-                child_count=$(pgrep -cP "$file_pid" 2>/dev/null) || child_count=0
-                if [[ "$child_count" -eq 0 ]]; then
-                    IDLE_STREAK[$sid]=$(( ${IDLE_STREAK[$sid]:-0} + 1 ))
-                    if [[ "${IDLE_STREAK[$sid]}" -ge 2 ]]; then
-                        display_status="waiting"
-                        display_activity="Waiting for input"
-                    fi
-                else
-                    IDLE_STREAK[$sid]=0
-                fi
-            else
-                IDLE_STREAK[$sid]=0
-            fi
-        fi
 
         # Truncate project name
         if [[ ${#project} -gt 20 ]]; then
@@ -249,13 +209,13 @@ render() {
         fi
 
         # Truncate activity
-        if [[ ${#display_activity} -gt 25 ]]; then
-            display_activity="${display_activity:0:24}…"
+        if [[ ${#activity} -gt 25 ]]; then
+            activity="${activity:0:24}…"
         fi
 
-        # Color and indicator based on status and staleness
+        # Color and indicator based on status
         local color indicator status_text
-        case "$display_status" in
+        case "$status" in
             waiting)
                 color="$RED"
                 indicator="●"
@@ -279,7 +239,7 @@ render() {
             *)
                 color="$DIM"
                 indicator="?"
-                status_text="$display_status"
+                status_text="$status"
                 ;;
         esac
 
@@ -293,10 +253,10 @@ render() {
         printf '\033[2K'
         if [[ "$is_current" == true ]]; then
             printf "${BOLD} >%-3s %-20s ${color}${indicator} %-8s${RESET}${BOLD} %-8s %-10s ${DIM}%s${RESET}\n" \
-                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$display_activity"
+                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
         else
             printf "  %-3s %-20s ${color}${indicator} %-8s${RESET} %-8s %-10s ${DIM}%s${RESET}\n" \
-                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$display_activity"
+                "$idx" "$project" "$status_text" "${ctx_int}%" "$age_str" "$activity"
         fi
         ((lines++))
 
@@ -308,6 +268,15 @@ render() {
             fi
             printf '\033[2K'
             printf "      ${DIM}%s${RESET}\n" "$summary"
+            ((lines++))
+        fi
+
+        # Subagent info sub-row
+        if [[ "$subagent_count" -gt 0 ]]; then
+            local agent_label="agent"
+            [[ "$subagent_count" -gt 1 ]] && agent_label="agents"
+            printf '\033[2K'
+            printf "      ${DIM}↳ %d %s running${RESET}\n" "$subagent_count" "$agent_label"
             ((lines++))
         fi
 
@@ -347,34 +316,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Hide cursor, restore on exit
 tput civis 2>/dev/null || true
-trap 'tput cnorm 2>/dev/null || true; [[ -n "${SUMMARIZER_PID:-}" ]] && kill "$SUMMARIZER_PID" 2>/dev/null; exit 0' EXIT INT TERM
-
-# Launch summarizer daemon if ollama is reachable
-if curl -s --max-time 2 "${MPX_OLLAMA_URL:-http://localhost:11434}/api/version" >/dev/null 2>&1; then
-    "$SCRIPT_DIR/mpx-summarize" &
-    SUMMARIZER_PID=$!
-fi
+trap 'tput cnorm 2>/dev/null || true; exit 0' EXIT INT TERM
 
 clear
 ORDERED_FILES=()
 LAST_LINES=0
-declare -A PREV_CPU_TIMES
-declare -A IDLE_STREAK
-
-get_cpu_time() {
-    local pid="$1"
-    if [[ "$pid" -gt 0 ]] && [[ -f "/proc/$pid/stat" ]]; then
-        local stat
-        stat=$(< "/proc/$pid/stat") 2>/dev/null || { echo 0; return; }
-        # Fields 14 (utime) and 15 (stime) in /proc/PID/stat
-        local utime stime
-        utime=$(echo "$stat" | awk '{print $14}')
-        stime=$(echo "$stat" | awk '{print $15}')
-        echo $(( utime + stime ))
-    else
-        echo 0
-    fi
-}
 
 while true; do
     render

@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# mpx-summarize-one — Generate summary for a single session (event-driven)
+# Called by writer.sh stop handler after a turn completes.
+# Usage: mpx-summarize-one <session_id>
+
+set -uo pipefail
+
+SESSION_ID="${1:?Usage: mpx-summarize-one <session_id>}"
+
+SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CACHE_DIR="$SCRIPT_DIR/.summary-cache"
+mkdir -p "$CACHE_DIR"
+
+MODEL="${MPX_SUMMARY_MODEL:-qwen2.5:3b}"
+OLLAMA_URL="${MPX_OLLAMA_URL:-http://localhost:11434}"
+
+PROMPT='What is the overall project goal? Reply with ONLY a short phrase (max 8 words), no quotes, no preamble. Start with a verb like Adding, Fixing, Building, Implementing. Be direct and concise — never say "adding a new feature to..." or "working on...", just state the action.
+
+User messages:'
+
+FILE="$SESSIONS_DIR/${SESSION_ID}.json"
+[[ -f "$FILE" ]] || exit 0
+
+# Check ollama is reachable
+curl -s --max-time 2 "${OLLAMA_URL}/api/version" >/dev/null 2>&1 || exit 0
+
+# Read session metadata
+CWD=$(jq -r '.cwd // empty' "$FILE" 2>/dev/null) || exit 0
+[[ -z "$CWD" ]] && exit 0
+
+# Find JSONL transcript
+ENCODED=$(echo "$CWD" | sed 's|^/||; s|/|-|g')
+JSONL="$HOME/.claude/projects/-${ENCODED}/${SESSION_ID}.jsonl"
+[[ -f "$JSONL" ]] || exit 0
+
+# Skip if file size unchanged since last run
+CURRENT_SIZE=$(stat -c%s "$JSONL" 2>/dev/null) || exit 0
+CACHE_FILE="$CACHE_DIR/${SESSION_ID}.size"
+if [[ -f "$CACHE_FILE" ]]; then
+    PREV_SIZE=$(cat "$CACHE_FILE" 2>/dev/null)
+    [[ "$CURRENT_SIZE" == "$PREV_SIZE" ]] && exit 0
+fi
+
+# Extract key user messages
+CONTEXT=$(python3 "$SCRIPT_DIR/summarize-extract.py" "$JSONL" 2>/dev/null)
+[[ -z "$CONTEXT" ]] && exit 0
+
+# Call ollama
+RESPONSE=$(curl -s --max-time 10 "${OLLAMA_URL}/api/generate" \
+    -d "$(jq -n \
+        --arg model "$MODEL" \
+        --arg prompt "${PROMPT}
+${CONTEXT}" \
+        '{model: $model, prompt: $prompt, stream: false}')" 2>/dev/null)
+
+[[ -z "$RESPONSE" ]] && exit 0
+
+SUMMARY=$(echo "$RESPONSE" | jq -r '.response // empty' 2>/dev/null)
+[[ -z "$SUMMARY" ]] && exit 0
+
+# Clean up: strip quotes, newlines, cap at 80 chars
+SUMMARY=$(echo "$SUMMARY" | tr '\n' ' ' | sed 's/^["\x27 ]*//; s/["\x27 ]*$//' | head -c 80)
+[[ -z "$SUMMARY" ]] && exit 0
+
+# Write summary into session JSON (atomic update with flock)
+(
+    flock -w 1 200 || exit 0
+    jq --arg summary "$SUMMARY" '.summary = $summary' "$FILE" > "${FILE}.tmp" \
+        && mv "${FILE}.tmp" "$FILE"
+) 200>"${FILE}.lock" || true
+
+# Update size cache
+echo "$CURRENT_SIZE" > "$CACHE_FILE"
