@@ -143,6 +143,8 @@ case "$EVENT" in
                 ;;
             Bash)
                 CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+                CMD="${CMD//$'\n'/ }"
+                CMD="${CMD//$'\r'/}"
                 if [[ ${#CMD} -gt 30 ]]; then
                     CMD="${CMD:0:30}…"
                 fi

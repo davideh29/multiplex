@@ -215,6 +215,10 @@ render() {
         activity=$(jq -r '.activity // ""' "$file" 2>/dev/null)
         tmux_sess=$(jq -r '.tmux_session // empty' "$file" 2>/dev/null)
         summary=$(jq -r '.summary // ""' "$file" 2>/dev/null)
+        activity="${activity//$'\n'/ }"
+        activity="${activity//$'\r'/}"
+        summary="${summary//$'\n'/ }"
+        summary="${summary//$'\r'/}"
         subagent_count=$(jq '(.subagents // {}) | length' "$file" 2>/dev/null) || subagent_count=0
 
         local age=$((now - last_update))
