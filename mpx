@@ -5,7 +5,8 @@
 
 set -uo pipefail
 
-SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SESSIONS_DIR="${SESSIONS_DIR:-$SCRIPT_DIR/sessions}"
 mkdir -p "$SESSIONS_DIR"
 
 STALE_REMOVE=600         # 10 minutes — auto-remove stale sessions
@@ -328,8 +329,6 @@ switch_to_session() {
     fi
     tmux select-pane -t "$tmux_pane" 2>/dev/null || true
 }
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Hide cursor, restore on exit
 tput civis 2>/dev/null || true

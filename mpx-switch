@@ -4,7 +4,8 @@
 
 set -uo pipefail
 
-SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SESSIONS_DIR="${SESSIONS_DIR:-$SCRIPT_DIR/sessions}"
 TARGET="${1:-}"
 
 if [[ -z "$TARGET" ]] || [[ "$TARGET" -lt 1 ]] || [[ "$TARGET" -gt 9 ]]; then

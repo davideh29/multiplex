@@ -42,7 +42,7 @@ Event-driven: `writer.sh stop` → spawns `mpx-summarize-one` in background → 
 
 - `writer.sh` — Core state machine. All session state mutations go through here.
 - `mpx` — TUI dashboard. Read-only (except cleanup of stale/ghost sessions).
-- `tmpx` — Workspace launcher. Creates 3-pane tmux layout.
+- `tmpx` — Workspace launcher. Creates 2-pane (or 3-pane with `MPX_SIDE_CMD`) tmux layout.
 - `mpx-switch` — Session switcher for tmux keybindings. Mirrors mpx's sort order.
 - `mpx-kill` — Kill current session, switch to next.
 - `mpx-summarize-one` — Event-driven single-session summarizer.
@@ -81,7 +81,7 @@ Event-driven: `writer.sh stop` → spawns `mpx-summarize-one` in background → 
 - `session_end` is the one exception that sets status directly to "inactive" (terminal state, no further derivation needed).
 - Tool activity descriptions should be short and human-readable (e.g., "Reading foo.js", "$ git status").
 - Interactive tools (`AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`) set `waiting_for_permission = true` immediately in the `tool_use` handler.
-- The `SESSIONS_DIR` path is hardcoded to `$HOME/workplace/multiplex/sessions` across all scripts.
+- `SESSIONS_DIR` defaults to `$SCRIPT_DIR/sessions`, overridable via env var.
 
 ## Dependencies
 
@@ -94,3 +94,4 @@ Event-driven: `writer.sh stop` → spawns `mpx-summarize-one` in background → 
 
 - `MPX_SUMMARY_MODEL` — ollama model (default: `qwen2.5:3b`)
 - `MPX_OLLAMA_URL` — ollama endpoint (default: `http://localhost:11434`)
+- `MPX_SIDE_CMD` — command for top-right pane in `tmpx` 3-pane layout (unset = 2-pane layout)

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # tmpx — Start a new multiplex workspace session
-# Layout: Claude (left) | dagflow-tui (top-right) | mpx (bottom-right)
+# Layout: Claude (left) | mpx (right)
+# With MPX_SIDE_CMD: Claude (left) | side cmd (top-right) | mpx (bottom-right)
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Determine session name
 if [[ -n "${1:-}" ]]; then
@@ -24,14 +25,19 @@ tmux new-session -d -s "$SESSION_NAME"
 # Split right pane at 40% width
 tmux split-window -h -t "${SESSION_NAME}:0" -l '40%'
 
-# Split right pane vertically — mpx on bottom at 35%
-tmux split-window -v -t "${SESSION_NAME}:0.1" -l '35%'
+if [[ -n "${MPX_SIDE_CMD:-}" ]]; then
+    # 3-pane layout: split right pane vertically — mpx on bottom at 35%
+    tmux split-window -v -t "${SESSION_NAME}:0.1" -l '35%'
 
-# Launch dagflow-tui in top-right (pane 1)
-tmux send-keys -t "${SESSION_NAME}:0.1" 'dagflow-tui' C-m
+    # Launch side command in top-right (pane 1)
+    tmux send-keys -t "${SESSION_NAME}:0.1" "$MPX_SIDE_CMD" C-m
 
-# Launch mpx in bottom-right (pane 2)
-tmux send-keys -t "${SESSION_NAME}:0.2" "${SCRIPT_DIR}/mpx" C-m
+    # Launch mpx in bottom-right (pane 2)
+    tmux send-keys -t "${SESSION_NAME}:0.2" "${SCRIPT_DIR}/mpx" C-m
+else
+    # 2-pane layout: mpx in right pane
+    tmux send-keys -t "${SESSION_NAME}:0.1" "${SCRIPT_DIR}/mpx" C-m
+fi
 
 # Focus the left pane for Claude
 tmux select-pane -t "${SESSION_NAME}:0.0"

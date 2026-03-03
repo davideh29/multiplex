@@ -5,10 +5,20 @@ A tmux-based session manager for Claude Code. Monitors all active Claude session
 ## What it does
 
 - **Real-time dashboard** (`mpx`) showing all Claude Code sessions with status, context usage, and activity
-- **Workspace launcher** (`tmpx`) creating standardized 3-pane tmux layouts
+- **Workspace launcher** (`tmpx`) creating standardized tmux layouts
 - **Session switching** via number keys or tmux keybindings
 - **LLM-powered summaries** of what each session is working on (via ollama)
 - **Automatic lifecycle management** — stale/exited sessions are cleaned up automatically
+
+## Quick Start
+
+```bash
+git clone <repo-url> multiplex
+cd multiplex
+./setup.sh
+```
+
+The setup script checks dependencies, configures Claude Code hooks, and offers to add tmux keybindings.
 
 ## Prerequisites
 
@@ -16,49 +26,67 @@ A tmux-based session manager for Claude Code. Monitors all active Claude session
 - `jq`
 - `bash` (4.0+)
 - `python3`
+- `flock` (from util-linux)
 - `ollama` (optional, for session summaries)
 
 ## Setup
 
-### 1. Configure Claude Code hooks
+### Automatic (recommended)
 
-Add the following to `~/.claude/settings.json`:
+```bash
+./setup.sh
+```
+
+This will:
+1. Check that all required dependencies are installed
+2. Make all scripts executable
+3. Configure Claude Code hooks in `~/.claude/settings.json`
+4. Offer to add tmux keybindings to `~/.tmux.conf`
+5. Print `PATH` setup instructions
+
+Safe to re-run — it won't duplicate hooks or keybindings.
+
+### Manual
+
+#### 1. Configure Claude Code hooks
+
+Add the following to `~/.claude/settings.json` (replace `<path-to-multiplex>` with the absolute path):
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "~/workplace/multiplex/writer.sh status_line"
+    "command": "<path-to-multiplex>/writer.sh status_line"
   },
   "hooks": {
-    "Notification": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh notification" }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh stop" }] }],
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh session_start" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh session_end" }] }],
-    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh tool_use" }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh permission_request" }] }],
-    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh post_tool_use" }] }],
-    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh post_tool_use_failure" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh user_prompt" }] }],
-    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh subagent_start" }] }],
-    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "~/workplace/multiplex/writer.sh subagent_stop" }] }]
+    "Notification": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh notification" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh stop" }] }],
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh session_start" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh session_end" }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh tool_use" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh permission_request" }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh post_tool_use" }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh post_tool_use_failure" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh user_prompt" }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh subagent_start" }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "<path-to-multiplex>/writer.sh subagent_stop" }] }]
   }
 }
 ```
 
-### 2. Optional: tmux keybindings
+#### 2. Optional: tmux keybindings
 
 Add to `~/.tmux.conf` for quick session switching and killing:
 
 ```tmux
-bind Q run-shell -b "~/workplace/multiplex/mpx-kill"
-bind 1 run-shell -b "~/workplace/multiplex/mpx-switch 1"
-bind 2 run-shell -b "~/workplace/multiplex/mpx-switch 2"
-bind 3 run-shell -b "~/workplace/multiplex/mpx-switch 3"
+bind Q run-shell -b "<path-to-multiplex>/mpx-kill"
+bind 1 run-shell -b "<path-to-multiplex>/mpx-switch 1"
+bind 2 run-shell -b "<path-to-multiplex>/mpx-switch 2"
+bind 3 run-shell -b "<path-to-multiplex>/mpx-switch 3"
 # ... up to 9
 ```
 
-### 3. Optional: session summaries
+#### 3. Optional: session summaries
 
 Install ollama and pull a model:
 
@@ -68,13 +96,23 @@ ollama pull qwen2.5:3b
 
 Summaries are generated automatically after each turn completes. No daemon required — `writer.sh` triggers `mpx-summarize-one` on the `stop` event.
 
+#### 4. Add to PATH
+
+```bash
+export PATH="<path-to-multiplex>:$PATH"
+```
+
 ## Usage
 
 ### `tmpx [name]`
 
-Create a new workspace session with a 3-pane layout:
+Create a new workspace session. Default layout is 2 panes:
 - **Left pane**: Claude Code (focused)
-- **Top-right pane**: dagflow-tui
+- **Right pane**: mpx monitor
+
+Set `MPX_SIDE_CMD` to get a 3-pane layout with a custom command in the top-right:
+- **Left pane**: Claude Code (focused)
+- **Top-right pane**: your command (e.g., `MPX_SIDE_CMD=htop`)
 - **Bottom-right pane**: mpx monitor
 
 Auto-names sessions `tmpx-1`, `tmpx-2`, etc. if no name given.
@@ -111,6 +149,7 @@ Kill the current tmux session and switch to the next available one. Designed for
 |----------|---------|-------------|
 | `MPX_SUMMARY_MODEL` | `qwen2.5:3b` | Ollama model for generating summaries |
 | `MPX_OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
+| `MPX_SIDE_CMD` | *(unset)* | Command to run in top-right pane of `tmpx` 3-pane layout |
 
 ## How it works
 
@@ -125,10 +164,11 @@ Kill the current tmux session and switch to the next available one. Designed for
 | File | Purpose |
 |------|---------|
 | `mpx` | Interactive session dashboard (TUI) |
-| `tmpx` | Workspace launcher (creates 3-pane tmux layout) |
+| `tmpx` | Workspace launcher (creates tmux layout) |
 | `writer.sh` | Session state writer (called by Claude Code hooks) |
 | `mpx-switch` | Switch to Nth session (for tmux keybindings) |
 | `mpx-kill` | Kill current session and switch to next |
 | `mpx-summarize-one` | Generate summary for a single session (event-driven) |
 | `mpx-summarize` | Legacy polling daemon for summaries (superseded by mpx-summarize-one) |
 | `summarize-extract.py` | Extract key user messages from JSONL transcripts |
+| `setup.sh` | Install and configure Multiplex |

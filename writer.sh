@@ -11,8 +11,8 @@
 
 set -euo pipefail
 
-SESSIONS_DIR="$HOME/workplace/multiplex/sessions"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SESSIONS_DIR="${SESSIONS_DIR:-$SCRIPT_DIR/sessions}"
 mkdir -p "$SESSIONS_DIR"
 
 EVENT="$1"
