@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # mpx-summarize — Background daemon that generates LLM-powered session summaries
-# Loops every ~15 seconds, reads each active session's JSONL transcript,
+# (Legacy: largely superseded by event-driven mpx-summarize-one)
+# Loops every 60 seconds, reads each active session's JSONL transcript,
 # extracts user messages, sends them to ollama, and writes the summary
 # back into the session JSON file.
 
