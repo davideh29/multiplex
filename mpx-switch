@@ -23,8 +23,18 @@ for f in "$SESSIONS_DIR"/*.json; do
     tmux_pane=$(jq -r '.tmux_pane // empty' "$f" 2>/dev/null) || continue
 
     # tmux pane check — primary authority for visibility
-    if [[ -n "$tmux_pane" ]] && ! tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
-        continue
+    if [[ -n "$tmux_pane" ]]; then
+        if ! tmux display-message -p -t "$tmux_pane" '#D' &>/dev/null; then
+            continue
+        fi
+        # Verify pane belongs to expected tmux session (IDs reuse after server restart)
+        expected_session=$(jq -r '.tmux_session // empty' "$f" 2>/dev/null) || expected_session=""
+        if [[ -n "$expected_session" ]]; then
+            actual_session=$(tmux display-message -p -t "$tmux_pane" '#{session_name}' 2>/dev/null) || actual_session=""
+            if [[ -n "$actual_session" && "$actual_session" != "$expected_session" ]]; then
+                continue
+            fi
+        fi
     fi
 
     # Staleness — only for sessions without pane info
@@ -34,10 +44,16 @@ for f in "$SESSIONS_DIR"/*.json; do
         continue
     fi
 
-    # Sort by creation time (chronological, stable ordering)
+    # Sort by status priority, then creation time (matches mpx TUI)
     created_at=$(jq -r '.created_at // .last_update // 0' "$f" 2>/dev/null) || continue
+    s_status=$(jq -r '.status // "active"' "$f" 2>/dev/null) || s_status="active"
+    case "$s_status" in
+        active|waiting) priority=0 ;;
+        done)           priority=1 ;;
+        *)              priority=2 ;;
+    esac
 
-    entries+=("${created_at}|${f}")
+    entries+=("${priority}${created_at}|${f}")
 done
 
 if [[ ${#entries[@]} -eq 0 ]]; then
