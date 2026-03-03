@@ -22,9 +22,6 @@ User messages:'
 FILE="$SESSIONS_DIR/${SESSION_ID}.json"
 [[ -f "$FILE" ]] || exit 0
 
-# Check ollama is reachable
-curl -s --max-time 2 "${OLLAMA_URL}/api/version" >/dev/null 2>&1 || exit 0
-
 # Read session metadata
 CWD=$(jq -r '.cwd // empty' "$FILE" 2>/dev/null) || exit 0
 [[ -z "$CWD" ]] && exit 0
@@ -46,13 +43,18 @@ fi
 CONTEXT=$(python3 "$SCRIPT_DIR/summarize-extract.py" "$JSONL" 2>/dev/null)
 [[ -z "$CONTEXT" ]] && exit 0
 
-# Call ollama
-RESPONSE=$(curl -s --max-time 10 "${OLLAMA_URL}/api/generate" \
-    -d "$(jq -n \
-        --arg model "$MODEL" \
-        --arg prompt "${PROMPT}
+# Call ollama (serialized: only one process calls ollama at a time)
+RESPONSE=$(
+    exec 201>"$CACHE_DIR/ollama.lock"
+    flock -w 60 201 || exit 0
+    curl -s --max-time 2 "${OLLAMA_URL}/api/version" >/dev/null 2>&1 || exit 0
+    curl -s --max-time 30 "${OLLAMA_URL}/api/generate" \
+        -d "$(jq -n \
+            --arg model "$MODEL" \
+            --arg prompt "${PROMPT}
 ${CONTEXT}" \
-        '{model: $model, prompt: $prompt, stream: false}')" 2>/dev/null)
+            '{model: $model, prompt: $prompt, stream: false}')" 2>/dev/null
+)
 
 [[ -z "$RESPONSE" ]] && exit 0
 
